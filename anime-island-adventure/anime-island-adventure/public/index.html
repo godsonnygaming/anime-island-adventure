@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Anime Island Adventure</title>
+<style>
+:root{--ink:#eaf5ff;--panel:rgba(8,20,42,.88);--gold:#ffd166}
+*{box-sizing:border-box}body{margin:0;background:#08172c;color:var(--ink);font-family:system-ui,-apple-system,Segoe UI,sans-serif;overflow:hidden}
+canvas{display:block;width:100vw;height:100vh;image-rendering:pixelated}
+#hud{position:fixed;inset:12px 12px auto;display:flex;justify-content:space-between;gap:10px;pointer-events:none}
+.panel{background:var(--panel);border:1px solid #6ba5d7;border-radius:12px;padding:10px 13px;box-shadow:0 8px 30px #0005;backdrop-filter:blur(5px)}
+#stats{min-width:220px}#stats strong{color:var(--gold)}.bar{height:10px;background:#253a53;border-radius:8px;overflow:hidden;margin:5px 0 8px}.fill{height:100%;width:100%;transition:width .15s}
+#health{background:#ff5d73}#xp{background:#5be7a9}#tips{max-width:310px;font-size:13px;line-height:1.45}
+#actions{position:fixed;bottom:14px;left:50%;transform:translateX(-50%);display:flex;gap:8px;align-items:center}
+button{border:1px solid #a9d9ff;background:#12345a;color:white;padding:10px 13px;border-radius:10px;font-weight:700;cursor:pointer;box-shadow:0 4px 0 #071326}
+button:active{transform:translateY(2px);box-shadow:0 2px 0 #071326}button:disabled{opacity:.45;cursor:default}
+#toast{position:fixed;top:125px;left:50%;transform:translateX(-50%);background:#0b1b31ed;border:1px solid #ffd166;border-radius:12px;padding:10px 16px;display:none;text-align:center;max-width:90vw}
+#start{position:fixed;inset:0;display:grid;place-items:center;background:linear-gradient(#06152acc,#06152af2);padding:20px}
+#start .card{max-width:560px;background:#0b2039;border:1px solid #65b6ef;border-radius:20px;padding:28px;text-align:center;box-shadow:0 20px 80px #0009}
+h1{margin:0 0 8px;font-size:clamp(28px,5vw,46px);color:#ffd166}p{line-height:1.55;color:#d6eaff}.small{font-size:13px;color:#9fc6e8}
+@media(max-width:650px){#hud{flex-direction:column;align-items:flex-start}#tips{display:none}#actions{width:calc(100% - 16px);flex-wrap:wrap;justify-content:center;bottom:8px}button{padding:9px 10px}#stats{min-width:190px}}
+</style>
+</head>
+<body>
+<canvas id="game" aria-label="Game map"></canvas>
+<div id="hud">
+  <div id="stats" class="panel">
+    <div><strong>ANIME ISLAND ADVENTURE</strong></div>
+    <div>Level <b id="level">1</b> · Coins <b id="coins">0</b></div>
+    <div class="small">HP <span id="hpText">100/100</span></div><div class="bar"><div id="health" class="fill"></div></div>
+    <div class="small">EXP <span id="xpText">0/60</span></div><div class="bar"><div id="xp" class="fill"></div></div>
+  </div>
+  <div id="tips" class="panel"><b>Điều khiển</b><br>WASD / phím mũi tên: di chuyển<br>Space: chém kiếm · E: năng lực Lửa<br>Đến gần NPC để nhận nhiệm vụ · Hạ quái để nhận EXP</div>
+</div>
+<div id="toast"></div>
+<div id="actions">
+  <button id="quest">📜 Nhận nhiệm vụ</button><button id="attack">⚔️ Chém (Space)</button><button id="power">🔥 Hỏa cầu (E)</button><button id="heal">💚 Hồi phục</button>
+</div>
+<div id="start"><div class="card">
+  <h1>ANIME ISLAND</h1><p>Khám phá đảo, luyện cấp, chiến đấu với quái và mở khóa sức mạnh lửa trong một game phiêu lưu 2D nguyên bản lấy cảm hứng từ thể loại anime RPG.</p>
+  <p><b>WASD / phím mũi tên</b> để đi · <b>Space</b> chém · <b>E</b> dùng Hỏa cầu</p>
+  <button id="play">▶ BẮT ĐẦU PHIÊU LƯU</button><p class="small">Bản chơi thử chạy trên trình duyệt; chưa có multiplayer hoặc lưu tài khoản.</p>
+</div></div>
+<script>
+(() => {
+const canvas=document.getElementById('game'), ctx=canvas.getContext('2d');
+let W=innerWidth,H=innerHeight,dpr=Math.min(devicePixelRatio||1,2);
+function resize(){W=innerWidth;H=innerHeight;canvas.width=W*dpr;canvas.height=H*dpr;ctx.setTransform(dpr,0,0,dpr,0,0)}
+addEventListener('resize',resize);resize();
+const keys={};addEventListener('keydown',e=>{keys[e.key.toLowerCase()]=true;if([' ','arrowup','arrowdown','arrowleft','arrowright'].includes(e.key.toLowerCase()))e.preventDefault();if(e.key===' ')attack();if(e.key.toLowerCase()==='e')fireball()});
+addEventListener('keyup',e=>keys[e.key.toLowerCase()]=false);
+const player={x:0,y:0,r:15,hp:100,maxHp:100,level:1,xp:0,need:60,coins:0,speed:220,facing:{x:1,y:0},cool:0,powerCool:0,invuln:0};
+let started=false,questActive=false,questKills=0,toastTimer=0,fx=[],last=0;
+const enemies=[];
+for(let i=0;i<13;i++) enemies.push({x:(Math.random()-.5)*1050,y:(Math.random()-.5)*680,r:14,hp:35,maxHp:35,speed:48+Math.random()*20,alive:true,respawn:0,hit:0});
+function msg(t){const el=document.getElementById('toast');el.textContent=t;el.style.display='block';toastTimer=2.5}
+function updateHud(){document.getElementById('level').textContent=player.level;document.getElementById('coins').textContent=player.coins;document.getElementById('hpText').textContent=Math.ceil(player.hp)+'/'+player.maxHp;document.getElementById('health').style.width=100*player.hp/player.maxHp+'%';document.getElementById('xpText').textContent=player.xp+'/'+player.need;document.getElementById('xp').style.width=100*player.xp/player.need+'%'}
+function dist(a,b){return Math.hypot(a.x-b.x,a.y-b.y)}
+function nearestEnemy(range){let best=null,bd=range;for(const e of enemies)if(e.alive){let d=dist(player,e);if(d<bd){best=e;bd=d}}return best}
+function damageEnemy(e,n){e.hp-=n;e.hit=.18;fx.push({x:e.x,y:e.y,t:.22,type:'hit'});if(e.hp<=0){e.alive=false;e.respawn=5;player.coins+=5+Math.floor(Math.random()*8);gainXp(22);if(questActive){questKills++;if(questKills>=5){questActive=false;player.coins+=80;gainXp(60);msg('Hoàn thành nhiệm vụ! +80 xu và +60 EXP');}else msg('Quái bị hạ! Tiến độ nhiệm vụ: '+questKills+'/5');}else msg('Hạ quái! Nhận xu và EXP');updateHud()}}
+function gainXp(n){player.xp+=n;while(player.xp>=player.need){player.xp-=player.need;player.level++;player.need=Math.round(player.need*1.32);player.maxHp+=15;player.hp=player.maxHp;msg('LÊN CẤP '+player.level+'! Máu đã hồi đầy.')}updateHud()}
+function attack(){if(!started||player.cool>0)return;player.cool=.42;fx.push({x:player.x+player.facing.x*28,y:player.y+player.facing.y*28,t:.18,type:'slash',dx:player.facing.x,dy:player.facing.y});const e=nearestEnemy(66);if(e){let vx=e.x-player.x,vy=e.y-player.y;if(vx*player.facing.x+vy*player.facing.y>-8)damageEnemy(e,22+player.level*3)}}
+function fireball(){if(!started||player.powerCool>0)return;player.powerCool=2.8;const x=player.x+player.facing.x*35,y=player.y+player.facing.y*35;fx.push({x,y,t:.55,type:'fire',dx:player.facing.x,dy:player.facing.y});for(const e of enemies){if(e.alive&&dist({x,y},e)<115)damageEnemy(e,30+player.level*5)}msg('Hỏa cầu bùng nổ!')}
+document.getElementById('attack').onclick=attack;document.getElementById('power').onclick=fireball;
+document.getElementById('quest').onclick=()=>{if(!started)return;if(!questActive){questActive=true;questKills=0;msg('Nhiệm vụ: hạ 5 quái Đảo Khởi Đầu!')}else msg('Nhiệm vụ đang làm: hạ '+(5-questKills)+' quái nữa')};
+document.getElementById('heal').onclick=()=>{if(started&&player.coins>=20&&player.hp<player.maxHp){player.coins-=20;player.hp=Math.min(player.maxHp,player.hp+50);updateHud();msg('Đã hồi 50 HP, tốn 20 xu')}else if(player.hp>=player.maxHp)msg('Máu đang đầy!');else msg('Cần 20 xu để hồi phục')};
+document.getElementById('play').onclick=()=>{started=true;document.getElementById('start').style.display='none';msg('Chào mừng đến Đảo Khởi Đầu! Tìm quái và nhận nhiệm vụ.');last=performance.now()};
+function drawIsland(){ctx.fillStyle='#1b7e70';ctx.fillRect(-1400,-1000,2800,2000);
+ // sand rim
+ ctx.fillStyle='#e9d39a';ctx.beginPath();ctx.ellipse(0,0,690,475,0,0,Math.PI*2);ctx.fill();
+ ctx.fillStyle='#58bd82';ctx.beginPath();ctx.ellipse(0,0,660,445,0,0,Math.PI*2);ctx.fill();
+ // paths and ponds
+ ctx.strokeStyle='#d8bd7c';ctx.lineWidth=76;ctx.lineCap='round';ctx.beginPath();ctx.moveTo(-560,210);ctx.quadraticCurveTo(-220,60,-80,-70);ctx.quadraticCurveTo(100,-220,500,-160);ctx.stroke();
+ ctx.fillStyle='#38a9c1';ctx.beginPath();ctx.ellipse(-350,-180,100,56,-.4,0,Math.PI*2);ctx.fill();
+ for(let i=0;i<32;i++){let x=Math.sin(i*97+2)*590,y=Math.cos(i*53+1)*385;if((x/660)**2+(y/445)**2>.83)continue;ctx.fillStyle='#236c58';ctx.beginPath();ctx.arc(x+5,y+7,18,0,Math.PI*2);ctx.fill();ctx.fillStyle='#17624e';ctx.beginPath();ctx.arc(x,y,17,0,Math.PI*2);ctx.fill();ctx.fillStyle='#37a56d';ctx.beginPath();ctx.arc(x-4,y-5,11,0,Math.PI*2);ctx.fill();}
+ // village
+ for(const [x,y,c] of [[-120,40,'#e87f5b'],[-65,15,'#7e87e8'],[-10,45,'#e8b957']]){ctx.fillStyle='#77513b';ctx.fillRect(x-20,y-12,40,30);ctx.fillStyle=c;ctx.beginPath();ctx.moveTo(x-28,y-10);ctx.lineTo(x,y-38);ctx.lineTo(x+28,y-10);ctx.fill();ctx.fillStyle='#fff1c5';ctx.fillRect(x-6,y+1,12,17);}
+ // quest NPC
+ ctx.fillStyle='#f6d365';ctx.beginPath();ctx.arc(70,-15,15,0,Math.PI*2);ctx.fill();ctx.fillStyle='#17243c';ctx.fillRect(61,-1,18,25);ctx.fillStyle='#fff';ctx.font='bold 13px system-ui';ctx.textAlign='center';ctx.fillText('NPC',70,-37);
+}
+function drawChar(x,y,color,outline='#14263d',r=15){ctx.fillStyle='#0003';ctx.beginPath();ctx.ellipse(x,y+r+5,r+4,6,0,0,Math.PI*2);ctx.fill();ctx.fillStyle=outline;ctx.beginPath();ctx.arc(x,y,r+2,0,Math.PI*2);ctx.fill();ctx.fillStyle=color;ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fill();ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(x+player.facing.x*4-4,y-4,3,0,Math.PI*2);ctx.arc(x+player.facing.x*4+4,y-4,3,0,Math.PI*2);ctx.fill();}
+function frame(now){const dt=Math.min((now-last)/1000||0,.04);last=now;
+ if(started){let dx=(keys.d||keys.arrowright?1:0)-(keys.a||keys.arrowleft?1:0),dy=(keys.s||keys.arrowdown?1:0)-(keys.w||keys.arrowup?1:0);if(dx||dy){let l=Math.hypot(dx,dy);dx/=l;dy/=l;player.facing={x:dx,y:dy};player.x+=dx*player.speed*dt;player.y+=dy*player.speed*dt;}player.x=Math.max(-620,Math.min(620,player.x));player.y=Math.max(-410,Math.min(410,player.y));player.cool=Math.max(0,player.cool-dt);player.powerCool=Math.max(0,player.powerCool-dt);player.invuln=Math.max(0,player.invuln-dt);
+ for(const e of enemies){if(!e.alive){e.respawn-=dt;if(e.respawn<=0){e.alive=true;e.hp=e.maxHp;e.x=(Math.random()-.5)*1000;e.y=(Math.random()-.5)*650;}continue;}e.hit=Math.max(0,e.hit-dt);let d=dist(player,e);if(d<230&&d>32){e.x+=(player.x-e.x)/d*e.speed*dt;e.y+=(player.y-e.y)/d*e.speed*dt;}if(d<29&&player.invuln<=0){player.hp-=8;player.invuln=.7;if(player.hp<=0){player.hp=player.maxHp;player.x=0;player.y=0;player.coins=Math.max(0,player.coins-10);msg('Bạn đã hồi sinh tại làng, mất 10 xu.')}updateHud()}}
+ for(const f of fx)f.t-=dt;fx=fx.filter(f=>f.t>0);if(toastTimer>0){toastTimer-=dt;if(toastTimer<=0)document.getElementById('toast').style.display='none'}
+ }
+ ctx.clearRect(0,0,W,H);ctx.fillStyle='#102e47';ctx.fillRect(0,0,W,H);ctx.save();ctx.translate(W/2-player.x,H/2-player.y);drawIsland();
+ // label
+ ctx.fillStyle='#103e36';ctx.font='bold 23px system-ui';ctx.textAlign='center';ctx.fillText('ĐẢO KHỞI ĐẦU',0,-330);
+ for(const e of enemies){if(!e.alive)continue;drawChar(e.x,e.y,e.hit?'#ffb0a6':'#bd6b8b','#542c56',e.r);ctx.fillStyle='#101c2d';ctx.fillRect(e.x-18,e.y-27,36,5);ctx.fillStyle='#ff5964';ctx.fillRect(e.x-18,e.y-27,36*Math.max(0,e.hp/e.maxHp),5);}
+ drawChar(player.x,player.y,player.invuln?'#fff2ad':'#5cb7ff');
+ for(const f of fx){if(f.type==='slash'){ctx.strokeStyle='#e7f6ff';ctx.lineWidth=7;ctx.beginPath();ctx.arc(f.x,f.y,30,-1.1,1.1);ctx.stroke()}else if(f.type==='fire'){ctx.fillStyle='#ffb02e';ctx.beginPath();ctx.arc(f.x,f.y,40*f.t/.55+10,0,Math.PI*2);ctx.fill();ctx.fillStyle='#ff4b39';ctx.beginPath();ctx.arc(f.x,f.y,22*f.t/.55+5,0,Math.PI*2);ctx.fill()}else{ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(f.x,f.y,10,0,Math.PI*2);ctx.fill()}}
+ ctx.restore();
+ // minimap
+ ctx.fillStyle='#08172cbb';ctx.fillRect(W-115,H-100,100,86);ctx.strokeStyle='#8ed8ff';ctx.strokeRect(W-115,H-100,100,86);ctx.fillStyle='#57bd82';ctx.beginPath();ctx.ellipse(W-65,H-57,42,33,0,0,Math.PI*2);ctx.fill();ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(W-65+player.x/620*35,H-57+player.y/410*27,4,0,Math.PI*2);ctx.fill();
+ requestAnimationFrame(frame)}
+requestAnimationFrame(frame);updateHud();
+})();
+</script>
+</body>
+</html>
